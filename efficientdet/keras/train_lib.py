@@ -301,6 +301,10 @@ def get_optimizer(params):
     # TODO(tanmingxing): potentially add dynamic_decay for new tfa release.
     from tensorflow_addons import optimizers as tfa_optimizers  # pylint: disable=g-import-not-at-top
     class MovingAverage(tfa_optimizers.MovingAverage):
+      def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._average_weights = None
+
       def assign_average_vars(self, var_list):
         """Assign variables in var_list with their respective averages.
 
@@ -445,15 +449,15 @@ def get_callbacks(params, val_dataset):
             optimizer = optimizer._optimizer
 
         assert isinstance(optimizer, AveragedOptimizerWrapper)
-
+        var_list = self.model.weights if optimizer._average_weights is None else optimizer._average_weights
         if self.update_weights:
-            optimizer.assign_average_vars(optimizer._average_weights)
+            optimizer.assign_average_vars(var_list)
             return super()._save_model(epoch, logs)
         else:
             # Note: `model.get_weights()` gives us the weights (non-ref)
             # whereas `model.variables` returns references to the variables.
             non_avg_weights = self.model.get_weights()
-            optimizer.assign_average_vars(optimizer._average_weights)
+            optimizer.assign_average_vars(var_list)
             # result is currently None, since `super._save_model` doesn't
             # return anything, but this may change in the future.
             result = super()._save_model(epoch, logs)
@@ -786,7 +790,8 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
     Returns:
       A dict record loss info.
     """
-    self.optimizer.shadow_copy(util_keras.get_ema_vars(self))
+    if self.config.moving_average_decay:
+      self.optimizer.shadow_copy(util_keras.get_ema_vars(self))
     images, labels = data
     if self.config.img_summary_steps:
       with self.summary_writer.as_default():
