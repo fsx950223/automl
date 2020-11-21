@@ -299,7 +299,61 @@ def get_optimizer(params):
   if moving_average_decay:
     # TODO(tanmingxing): potentially add dynamic_decay for new tfa release.
     from tensorflow_addons import optimizers as tfa_optimizers  # pylint: disable=g-import-not-at-top
-    optimizer = tfa_optimizers.MovingAverage(
+    class MovingAverage(tfa_optimizers.MovingAverage):
+      def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._average_weights = None
+      
+      @property
+      def average_variables(self):
+        return self.average_weights
+
+      @average_variables.setter
+      def average_variables(self, weights):
+        self.average_weights=weights
+
+      @property  
+      def average_weights(self):
+        if self._average_weights is None:
+          self._average_weights = self._model_weights
+        return self._average_weights
+      
+      @average_weights.setter
+      def average_weights(self, weights):
+        self._average_weights=weights
+
+      def assign_average_vars(self, var_list):
+        """Assign variables in var_list with their respective averages.
+
+        Args:
+            var_list: List of model variables to be assigned to their average.
+
+        Returns:
+            assign_op: The op corresponding to the assignment operation of
+            variables to their average.
+
+        Example:
+        ```python
+        model = tf.Sequential([...])
+        opt = tfa.optimizers.SWA(
+                tf.keras.optimizers.SGD(lr=2.0), 100, 10)
+        model.compile(opt, ...)
+        model.fit(x, y, ...)
+
+        # Update the weights to their mean before saving
+        opt.assign_average_vars(model.variables)
+
+        model.save('model.h5')
+        ```
+        """
+        assign_op = tf.group(
+            [
+                var.assign(self.get_slot(var, "average"), use_locking=self._use_locking)
+                for var in var_list
+            ]
+        )
+        return assign_op
+    optimizer = MovingAverage(
         optimizer, average_decay=moving_average_decay, dynamic_decay=True)
   if params['mixed_precision']:
     optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
@@ -399,7 +453,33 @@ class DisplayCallback(tf.keras.callbacks.Callback):
 def get_callbacks(params, val_dataset):
   """Get callbacks for given params."""
   if params.get('moving_average_decay', None):
-    from tensorflow_addons.callbacks import AverageModelCheckpoint
+    from tensorflow_addons import callbacks as tfa_callbacks
+    from tensorflow_addons.optimizers.average_wrapper import AveragedOptimizerWrapper
+    class AverageModelCheckpoint(tfa_callbacks.AverageModelCheckpoint):
+      def _save_model(self, epoch, logs):
+        optimizer = self.model.optimizer
+
+        # TODO(fsx950223): change to inner_optimizer after tf2.5 is released
+        if isinstance(
+            optimizer, tf.keras.mixed_precision.experimental.LossScaleOptimizer
+        ):
+            optimizer = optimizer._optimizer
+
+        assert isinstance(optimizer, AveragedOptimizerWrapper)
+
+        if self.update_weights:
+            optimizer.assign_average_vars(optimizer.average_weights)
+            return super()._save_model(epoch, logs)
+        else:
+            # Note: `model.get_weights()` gives us the weights (non-ref)
+            # whereas `model.variables` returns references to the variables.
+            non_avg_weights = self.model.get_weights()
+            optimizer.assign_average_vars(optimizer.average_weights)
+            # result is currently None, since `super._save_model` doesn't
+            # return anything, but this may change in the future.
+            result = super()._save_model(epoch, logs)
+            self.model.set_weights(non_avg_weights)
+            return result
     avg_callback = AverageModelCheckpoint(
         filepath=os.path.join(params['model_dir'], 'ckpt'),
         verbose=1,
