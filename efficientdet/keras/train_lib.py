@@ -301,28 +301,6 @@ def get_optimizer(params):
     # TODO(tanmingxing): potentially add dynamic_decay for new tfa release.
     from tensorflow_addons import optimizers as tfa_optimizers  # pylint: disable=g-import-not-at-top
     class MovingAverage(tfa_optimizers.MovingAverage):
-      def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._average_weights = None
-      
-      @property
-      def average_variables(self):
-        return self.average_weights
-
-      @average_variables.setter
-      def average_variables(self, weights):
-        self.average_weights=weights
-
-      @property  
-      def average_weights(self):
-        if self._average_weights is None:
-          self._average_weights = self._model_weights
-        return self._average_weights
-      
-      @average_weights.setter
-      def average_weights(self, weights):
-        self._average_weights=weights
-
       def assign_average_vars(self, var_list):
         """Assign variables in var_list with their respective averages.
 
@@ -356,7 +334,6 @@ def get_optimizer(params):
         return assign_op
     optimizer = MovingAverage(
         optimizer, average_decay=moving_average_decay, dynamic_decay=True)
-    optimizer.average_weights = util_keras.get_ema_vars(self)
   if params['mixed_precision']:
     optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
         optimizer,
@@ -470,13 +447,13 @@ def get_callbacks(params, val_dataset):
         assert isinstance(optimizer, AveragedOptimizerWrapper)
 
         if self.update_weights:
-            optimizer.assign_average_vars(optimizer.average_weights)
+            optimizer.assign_average_vars(optimizer._average_weights)
             return super()._save_model(epoch, logs)
         else:
             # Note: `model.get_weights()` gives us the weights (non-ref)
             # whereas `model.variables` returns references to the variables.
             non_avg_weights = self.model.get_weights()
-            optimizer.assign_average_vars(optimizer.average_weights)
+            optimizer.assign_average_vars(optimizer._average_weights)
             # result is currently None, since `super._save_model` doesn't
             # return anything, but this may change in the future.
             result = super()._save_model(epoch, logs)
@@ -809,6 +786,7 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
     Returns:
       A dict record loss info.
     """
+    self.optimizer.shadow_copy(util_keras.get_ema_vars(self))
     images, labels = data
     if self.config.img_summary_steps:
       with self.summary_writer.as_default():
