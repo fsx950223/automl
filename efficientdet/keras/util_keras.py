@@ -141,3 +141,13 @@ def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
           logging.warning('%s: %s', key, e)
         else:
           raise e
+
+
+def get_ema_vars(model: tf.keras.Model):
+  """Get all exponential moving average (ema) variables."""
+  ema_vars = model.trainable_weights
+  for v in model.weights:
+    # We maintain mva for batch norm moving mean and variance as well.
+    if 'moving_mean' in v.name or 'moving_variance' in v.name:
+      ema_vars.append(v)
+  return list(set(ema_vars))

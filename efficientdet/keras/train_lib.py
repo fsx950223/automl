@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 """Training related libraries."""
+from keras import util_keras
 import math
 import os
 import re
@@ -355,6 +356,7 @@ def get_optimizer(params):
         return assign_op
     optimizer = MovingAverage(
         optimizer, average_decay=moving_average_decay, dynamic_decay=True)
+    optimizer.average_weights = util_keras.get_ema_vars(self)
   if params['mixed_precision']:
     optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
         optimizer,
