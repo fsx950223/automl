@@ -3,16 +3,6 @@
 [1] Mingxing Tan, Ruoming Pang, Quoc V. Le. EfficientDet: Scalable and Efficient Object Detection. CVPR 2020.
 Arxiv link: https://arxiv.org/abs/1911.09070
 
-Updates:
-
-  - **Jul20: Added keras/TF2 and new SOTA D7x: 55.1mAP with 153ms**
-  - Apr22: Sped up end-to-end latency: D0 has up to >200 FPS throughput on Tesla V100.
-    * A great collaboration with [@fsx950223](https://github.com/fsx950223).
-  - Apr1: Updated results for test-dev and added EfficientDet-D7.
-  - Mar26: Fixed a few bugs and updated all checkpoints/results.
-  - Mar24: Added tutorial with visualization and coco eval.
-  - Mar 13: Released the initial code and models.
-
 **Quick start tutorial: [tutorial.ipynb](tutorial.ipynb)**
 
 **Quick install dependencies: ```pip install -r requirements.txt```**
