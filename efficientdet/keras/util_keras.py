@@ -111,17 +111,20 @@ def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
       '_CHECKPOINTABLE_OBJECT_GRAPH'):
     model.load_weights(ckpt_path_or_file)
   else:
+    
     if ema_decay > 0:
       ema = tf.train.ExponentialMovingAverage(decay=0.0)
-      ema_vars = get_ema_vars(model)
-      var_dict = {
-          average_name(ema, var): var for (ref, var) in ema_vars.items()
-      }
-    else:
-      ema_vars = get_ema_vars(model)
-      var_dict = {
-          var.name.split(':')[0]: var for (ref, var) in ema_vars.items()
-      }
+      optimizer = model.optimizer
+      if isinstance(optimizer, tf.keras.mixed_precision.experimental.LossScaleOptimizer):
+        optimizer = optimizer._optimizer
+      # optimizer.weights
+      # var_dict = {
+      #     average_name(ema, var): var for (ref, var) in ema_vars.items()
+      # }
+    ema_vars = get_ema_vars(model)
+    var_dict = {
+        var.name.split(':')[0]: var for (ref, var) in ema_vars.items()
+    }
     # add variables that not in var_dict
     for v in model.weights:
       if v.ref() not in ema_vars:
@@ -141,13 +144,3 @@ def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
           logging.warning('%s: %s', key, e)
         else:
           raise e
-
-
-def get_ema_vars(model: tf.keras.Model):
-  """Get all exponential moving average (ema) variables."""
-  ema_vars = model.trainable_weights
-  for v in model.weights:
-    # We maintain mva for batch norm moving mean and variance as well.
-    if 'moving_mean' in v.name or 'moving_variance' in v.name:
-      ema_vars.append(v)
-  return list(set(ema_vars))
