@@ -433,7 +433,7 @@ class DisplayCallback(tf.keras.callbacks.Callback):
       tf.summary.image('Test image', tf.expand_dims(image, axis=0), step=step)
     self.model.__class__ = EfficientDetNetTrain
 
-def get_callbacks(params, val_dataset):
+def get_callbacks(params, val_dataset=None):
   """Get callbacks for given params."""
   if params.get('moving_average_decay', None):
     from tensorflow_addons import callbacks as tfa_callbacks

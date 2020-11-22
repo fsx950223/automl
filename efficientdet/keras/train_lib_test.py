@@ -78,11 +78,6 @@ class TrainLibTest(tf.test.TestCase):
         legacy_fn.focal_loss(box_outputs, box_targets, alpha, gamma,
                              num_positives),
         focal_loss_v2([num_positives, box_targets], box_outputs))
-    # TODO(tanmingxing): Re-enable this test after fixing this failing test.
-    # self.assertEqual(
-    #     legacy_fn._box_iou_loss(box_outputs, box_targets, num_positives,
-    #                             'ciou'),
-    #     box_iou_loss([num_positives, box_targets], box_outputs))
     iou_loss = box_iou_loss([num_positives, box_targets], box_outputs)
     self.assertAlmostEqual(iou_loss.numpy(), 4.924635, places=5)
 
@@ -119,6 +114,7 @@ class TrainLibTest(tf.test.TestCase):
     params['iterations_per_loop'] = 100
     params['model_dir'] = tempfile.mkdtemp()
     params['profile'] = False
+    params['val_json_file'] = None
     config.override(params, allow_new_keys=True)
     model = train_lib.EfficientDetNetTrain(config=config)
     model.build((1, 512, 512, 3))
@@ -153,14 +149,14 @@ class TrainLibTest(tf.test.TestCase):
     _, x, labels, model = self._build_model()
     outputs = model.train_on_batch(x, labels, return_dict=True)
     expect_results = {
-        'loss': 21184.48046875,
-        'det_loss': 21182.03125,
-        'cls_loss': 10.0,
-        'box_loss': 423.44061279296875,
+        'loss': 26279.4805,
+        'det_loss': 26277.0352,
+        'cls_loss': 5060.7173,
+        'box_loss': 424.3264,
         'gradient_norm': 10.0,
-        'reg_l2_loss': 0.,
-        'learning_rate': 0.,
-        'seg_loss': 1.224212408065796,
+        'reg_l2_loss': 1.2241,
+        'learning_rate': 0.0080,
+        'seg_loss': 1.2215,
     }
     self.assertAllClose(outputs, expect_results, rtol=.1, atol=100.)
 
@@ -168,12 +164,12 @@ class TrainLibTest(tf.test.TestCase):
     _, x, labels, model = self._build_model()
     outputs = model.test_on_batch(x, labels, return_dict=True)
     expect_results = {
-        'loss': 21191.556640625,
-        'det_loss': 21189.234375,
-        'cls_loss': 10.0,
+        'loss': 26064.126953125,
+        'det_loss': 26078.49609375,
+        'cls_loss': 5063.3759765625,
+        'box_loss': 420.30242919921875,
+        'seg_loss': 1.2299377918243408,
         'reg_l2_loss': 0.,
-        'box_loss': 423.5846862792969,
-        'seg_loss': 1.0981438159942627,
     }
     self.assertAllClose(outputs, expect_results, rtol=.1, atol=100.)
 
@@ -185,16 +181,15 @@ class TrainLibTest(tf.test.TestCase):
         steps_per_epoch=1,
         epochs=1,
         callbacks=train_lib.get_callbacks(params))
-    self.assertAllClose(hist.history['loss'], [21228.], rtol=.1, atol=10.)
-    self.assertAllClose(hist.history['det_loss'], [21226.], rtol=.1, atol=10.)
-    self.assertAllClose(hist.history['cls_loss'], [10.], rtol=.1, atol=10.)
-    self.assertAllClose(hist.history['box_loss'], [424.], rtol=.1, atol=100.)
+    self.assertAllClose(hist.history['loss'], [26279.4785], rtol=.1, atol=10.)
+    self.assertAllClose(hist.history['det_loss'], [26277.0332], rtol=.1, atol=10.)
+    self.assertAllClose(hist.history['cls_loss'], [5060.7173], rtol=.1, atol=10.)
+    self.assertAllClose(hist.history['box_loss'], [424.3263], rtol=.1, atol=10.)
     self.assertAllClose(
-        hist.history['seg_loss'], [1.221547], rtol=.1, atol=100.)
+        hist.history['seg_loss'], [1.2215], rtol=.1, atol=10.)
     # skip gnorm test because it is flaky.
 
   def test_recompute_grad(self):
-    tf.config.run_functions_eagerly(True)
     _, x, labels, model = self._build_model(False)
     with tf.GradientTape() as tape:
       loss_vals = {}
