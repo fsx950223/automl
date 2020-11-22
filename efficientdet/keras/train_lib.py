@@ -791,7 +791,7 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
       A dict record loss info.
     """
     if self.config.moving_average_decay:
-      self.optimizer.shadow_copy(util_keras.get_ema_vars(self))
+      self.optimizer.shadow_copy(list(util_keras.get_ema_vars(self).values()))
     images, labels = data
     if self.config.img_summary_steps:
       with self.summary_writer.as_default():
