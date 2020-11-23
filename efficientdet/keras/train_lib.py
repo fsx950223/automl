@@ -318,11 +318,11 @@ def get_optimizer(params):
 
       @property
       def averagable_weights(self):
-        return self._averagable_weights
+        return [weight.deref() for weight in self._averagable_weights]
 
       @averagable_weights.setter
       def averagable_weights(self, weights):
-        self._averagable_weights = weights
+        self._averagable_weights = {weight.ref() for weight in weights}
 
       def _create_slots(self, var_list):
         self._optimizer._create_slots(
@@ -333,11 +333,8 @@ def get_optimizer(params):
         for var in self.averagable_weights:
           self.add_slot(var, 'average', var.read_value())
 
-      def assign_average_vars(self, var_list):
+      def assign_average_vars(self):
         """Assign variables in var_list with their respective averages.
-
-        Args:
-            var_list: List of model variables to be assigned to their average.
 
         Returns:
             assign_op: The op corresponding to the assignment operation of
@@ -358,7 +355,7 @@ def get_optimizer(params):
         ```
         """
         assign_ops = []
-        for var in var_list:
+        for var in self.averagable_weights:
           average_var = self.get_slot(var, 'average')
           average_value = self.average_op(var, average_var)
           assign_op = var.assign(average_value, use_locking=self._use_locking)
@@ -464,46 +461,11 @@ class DisplayCallback(tf.keras.callbacks.Callback):
 
 def get_callbacks(params, val_dataset=None):
   """Get callbacks for given params."""
-  if params.get('moving_average_decay', None):
-    from tensorflow_addons import callbacks as tfa_callbacks
-    from tensorflow_addons.optimizers.average_wrapper import AveragedOptimizerWrapper
-    class AverageModelCheckpoint(tfa_callbacks.AverageModelCheckpoint):
-      def _save_model(self, epoch, logs):
-        optimizer = self.model.optimizer
-
-        # TODO(fsx950223): change to inner_optimizer after tf2.5 is released
-        if isinstance(
-            optimizer, tf.keras.mixed_precision.experimental.LossScaleOptimizer
-        ):
-            optimizer = optimizer._optimizer
-
-        assert isinstance(optimizer, AveragedOptimizerWrapper)
-        var_list = optimizer.averagable_weights
-        if self.update_weights:
-            optimizer.assign_average_vars(var_list)
-            return super()._save_model(epoch, logs)
-        else:
-            # Note: `model.get_weights()` gives us the weights (non-ref)
-            # whereas `model.variables` returns references to the variables.
-            non_avg_weights = self.model.get_weights()
-            optimizer.assign_average_vars(var_list)
-            # result is currently None, since `super._save_model` doesn't
-            # return anything, but this may change in the future.
-            result = super()._save_model(epoch, logs)
-            self.model.set_weights(non_avg_weights)
-            return result
-    avg_callback = AverageModelCheckpoint(
-        filepath=os.path.join(params['model_dir'], 'ckpt'),
-        verbose=1,
-        save_weights_only=True,
-        update_weights=True)
-    callbacks = [avg_callback]
-  else:
-    ckpt_callback = tf.keras.callbacks.ModelCheckpoint(
-        os.path.join(params['model_dir'], 'ckpt'),
-        verbose=1,
-        save_weights_only=True)
-    callbacks = [ckpt_callback]
+  ckpt_callback = tf.keras.callbacks.ModelCheckpoint(
+      os.path.join(params['model_dir'], 'ckpt'),
+      verbose=1,
+      save_weights_only=True)
+  callbacks = [ckpt_callback]
   if params['model_optimizations'] and 'prune' in params['model_optimizations']:
     prune_callback = UpdatePruningStep()
     prune_summaries = PruningSummaries(
@@ -677,6 +639,7 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
     super().__init__(*args, **kwargs)
     log_dir = os.path.join(self.config.model_dir, 'train_images')
     self.summary_writer = tf.summary.create_file_writer(log_dir)
+    self.ema = None
 
   def _freeze_vars(self):
     if self.config.var_freeze_expr:
@@ -870,12 +833,16 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
       gradients, _ = tf.clip_by_global_norm(gradients, clip_norm)
       loss_vals['gradient_norm'] = tf.linalg.global_norm(gradients)
     train_op = self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+    if self.config.moving_average_decay:
+      with tf.control_dependencies([train_op]):
+        self.optimizer.assign_average_vars()
     # if not tf.executing_eagerly() and self.config.moving_average_decay:
-    #   ema = tf.train.ExponentialMovingAverage(
-    #     decay=self.config.moving_average_decay, num_updates=self.optimizer.iterations)
+    #   if self.ema is None:
+    #     self.ema = tf.train.ExponentialMovingAverage(
+    #       decay=self.config.moving_average_decay, num_updates=self.optimizer.iterations)
     #   ema_vars = list(util_keras.get_ema_vars(self).values())
     #   with tf.control_dependencies([train_op]):
-    #     ema.apply(ema_vars)
+    #     self.ema.apply(ema_vars)
     return loss_vals
 
   def test_step(self, data):
