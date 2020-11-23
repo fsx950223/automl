@@ -305,6 +305,17 @@ def get_optimizer(params):
         super().__init__(*args, **kwargs)
         self._averagable_weights = None
 
+      def _resource_apply_dense(self, grad, var):
+        return self._optimizer._resource_apply_dense(grad, var)
+
+      def _resource_apply_sparse(self, grad, var, indices):
+        return self._optimizer._resource_apply_sparse(grad, var, indices)
+
+      def _resource_apply_sparse_duplicate_indices(self, grad, var, indices):
+        return self._optimizer._resource_apply_sparse_duplicate_indices(
+          grad, var, indices
+        )
+
       @property
       def averagable_weights(self):
         return self._averagable_weights
@@ -317,6 +328,8 @@ def get_optimizer(params):
         self._optimizer._create_slots(
           var_list=var_list
         )  # pylint: disable=protected-access
+        if self.averagable_weights is None:
+          self.averagable_weights = var_list
         for var in self.averagable_weights:
           self.add_slot(var, 'average', var.read_value())
 
@@ -344,13 +357,14 @@ def get_optimizer(params):
         model.save('model.h5')
         ```
         """
-        assign_op = tf.group(
-            [
-                var.assign(self.get_slot(var, 'average'), use_locking=self._use_locking)
-                for var in var_list
-            ]
-        )
-        return assign_op
+        assign_ops = []
+        for var in var_list:
+          average_var = self.get_slot(var, 'average')
+          average_value = self.average_op(var, average_var)
+          assign_op = var.assign(average_value, use_locking=self._use_locking)
+          assign_ops.append(assign_op)
+        return assign_ops
+
     optimizer = MovingAverage(
         optimizer, average_decay=moving_average_decay, dynamic_decay=True)
   if params['mixed_precision']:
@@ -464,11 +478,7 @@ def get_callbacks(params, val_dataset=None):
             optimizer = optimizer._optimizer
 
         assert isinstance(optimizer, AveragedOptimizerWrapper)
-        if optimizer.averagable_weights is None:
-          var_list = self.model.weights
-        else:
-          var_list = optimizer.averagable_weights
-
+        var_list = optimizer.averagable_weights
         if self.update_weights:
             optimizer.assign_average_vars(var_list)
             return super()._save_model(epoch, logs)
@@ -859,7 +869,13 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
       ]
       gradients, _ = tf.clip_by_global_norm(gradients, clip_norm)
       loss_vals['gradient_norm'] = tf.linalg.global_norm(gradients)
-    self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+    train_op = self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+    # if not tf.executing_eagerly() and self.config.moving_average_decay:
+    #   ema = tf.train.ExponentialMovingAverage(
+    #     decay=self.config.moving_average_decay, num_updates=self.optimizer.iterations)
+    #   ema_vars = list(util_keras.get_ema_vars(self).values())
+    #   with tf.control_dependencies([train_op]):
+    #     ema.apply(ema_vars)
     return loss_vals
 
   def test_step(self, data):
