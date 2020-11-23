@@ -303,7 +303,22 @@ def get_optimizer(params):
     class MovingAverage(tfa_optimizers.MovingAverage):
       def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._average_weights = None
+        self._averagable_weights = None
+
+      @property
+      def averagable_weights(self):
+        return self._averagable_weights
+
+      @averagable_weights.setter
+      def averagable_weights(self, weights):
+        self._averagable_weights = weights
+
+      def _create_slots(self, var_list):
+        self._optimizer._create_slots(
+          var_list=var_list
+        )  # pylint: disable=protected-access
+        for var in self.averagable_weights:
+          self.add_slot(var, 'average', var.read_value())
 
       def assign_average_vars(self, var_list):
         """Assign variables in var_list with their respective averages.
@@ -331,7 +346,7 @@ def get_optimizer(params):
         """
         assign_op = tf.group(
             [
-                var.assign(self.get_slot(var, "average"), use_locking=self._use_locking)
+                var.assign(self.get_slot(var, 'average'), use_locking=self._use_locking)
                 for var in var_list
             ]
         )
@@ -449,7 +464,11 @@ def get_callbacks(params, val_dataset=None):
             optimizer = optimizer._optimizer
 
         assert isinstance(optimizer, AveragedOptimizerWrapper)
-        var_list = self.model.weights if optimizer._average_weights is None else optimizer._average_weights
+        if optimizer.averagable_weights is None:
+          var_list = self.model.weights
+        else:
+          var_list = optimizer.averagable_weights
+
         if self.update_weights:
             optimizer.assign_average_vars(var_list)
             return super()._save_model(epoch, logs)
@@ -790,8 +809,6 @@ class EfficientDetNetTrain(efficientdet_keras.EfficientDetNet):
     Returns:
       A dict record loss info.
     """
-    if self.config.moving_average_decay:
-      self.optimizer.shadow_copy(list(util_keras.get_ema_vars(self).values()))
     images, labels = data
     if self.config.img_summary_steps:
       with self.summary_writer.as_default():

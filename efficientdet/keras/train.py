@@ -130,6 +130,8 @@ def setup_model(config):
                   from_logits=True,
                   reduction=tf.keras.losses.Reduction.NONE)}
       )
+  if config.moving_average_decay:
+    model.optimizer.averagable_weights = list(util_keras.get_ema_vars(model).values())
   return model
 
 

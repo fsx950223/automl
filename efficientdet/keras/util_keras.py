@@ -73,27 +73,22 @@ def get_ema_vars(model):
   return ema_vars_dict
 
 
-def average_name(ema, var):
-  """Returns the name of the `Variable` holding the average for `var`.
-
-  A hacker for tf2.
-
-  Args:
-    ema: A `ExponentialMovingAverage` object.
-    var: A `Variable` object.
-
-  Returns:
-    A string: The name of the variable that will be used or was used
-    by the `ExponentialMovingAverage class` to hold the moving average of `var`.
-  """
-
-  if var.ref() in ema._averages:  # pylint: disable=protected-access
-    return ema._averages[var.ref()].name.split(':')[0]  # pylint: disable=protected-access
-  return tf.compat.v1.get_default_graph().unique_name(
-      var.name.split(':')[0] + '/' + ema.name, mark_as_used=False)
+def _assign_variable(key, var, ckpt_path_or_file, skip_mismatch=True):
+  try:
+    var.assign(tf.train.load_variable(ckpt_path_or_file, key))
+  except tf.errors.NotFoundError as e:
+    if skip_mismatch:
+      logging.warning('Not found %s in %s', key, ckpt_path_or_file)
+    else:
+      raise e
+  except ValueError as e:
+    if skip_mismatch:
+      logging.warning('%s: %s', key, e)
+    else:
+      raise e
 
 
-def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
+def restore_ckpt(model, ckpt_path_or_file, ema_decay=0.9998, skip_mismatch=True):
   """Restore variables from a given checkpoint.
 
   Args:
@@ -111,16 +106,18 @@ def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
       '_CHECKPOINTABLE_OBJECT_GRAPH'):
     model.load_weights(ckpt_path_or_file)
   else:
-    
     if ema_decay > 0:
       ema = tf.train.ExponentialMovingAverage(decay=0.0)
       optimizer = model.optimizer
       if isinstance(optimizer, tf.keras.mixed_precision.experimental.LossScaleOptimizer):
         optimizer = optimizer._optimizer
-      # optimizer.weights
-      # var_dict = {
-      #     average_name(ema, var): var for (ref, var) in ema_vars.items()
-      # }
+      var_list = model._freeze_vars()
+      optimizer._create_all_weights(var_list)
+      average_weights = [weight for weight in optimizer.weights if weight.name.split('/')[-1].find('average')>=0]
+      for var in average_weights:
+        key = '/'.join(var.name.split('/')[:-1] + [ema.name])
+        _assign_variable(key, var, ckpt_path_or_file, skip_mismatch)
+
     ema_vars = get_ema_vars(model)
     var_dict = {
         var.name.split(':')[0]: var for (ref, var) in ema_vars.items()
@@ -132,15 +129,4 @@ def restore_ckpt(model, ckpt_path_or_file, ema_decay=0., skip_mismatch=True):
     # try to load graph-based checkpoint with ema support,
     # else load checkpoint via keras.load_weights which doesn't support ema.
     for key, var in var_dict.items():
-      try:
-        var.assign(tf.train.load_variable(ckpt_path_or_file, key))
-      except tf.errors.NotFoundError as e:
-        if skip_mismatch:
-          logging.warning('Not found %s in %s', key, ckpt_path_or_file)
-        else:
-          raise e
-      except ValueError as e:
-        if skip_mismatch:
-          logging.warning('%s: %s', key, e)
-        else:
-          raise e
+      _assign_variable(key, var, ckpt_path_or_file, skip_mismatch)
