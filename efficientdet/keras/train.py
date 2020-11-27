@@ -25,6 +25,7 @@ import utils
 from keras import tfmot
 from keras import train_lib
 from keras import util_keras
+from keras import label_util
 
 
 # Cloud TPU Cluster Resolvers
@@ -101,6 +102,7 @@ FLAGS = flags.FLAGS
 
 def setup_model(config):
   """Build and compile model."""
+  label_map = label_util.get_label_map(config.label_map)
   model = train_lib.EfficientDetNetTrain(config=config)
   model.build((None, *config.image_size, 3))
   model.compile(
@@ -124,6 +126,7 @@ def setup_model(config):
                   config.alpha,
                   config.gamma,
                   label_smoothing=config.label_smoothing,
+                  mask = tf.one_hot(list(label_map.keys()), config.num_classes),
                   reduction=tf.keras.losses.Reduction.NONE),
           tf.keras.losses.SparseCategoricalCrossentropy.__name__:
               tf.keras.losses.SparseCategoricalCrossentropy(

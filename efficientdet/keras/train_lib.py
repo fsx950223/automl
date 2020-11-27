@@ -472,7 +472,7 @@ class FocalLoss(tf.keras.losses.Loss):
   where pt is the probability of being classified to the true class.
   """
 
-  def __init__(self, alpha, gamma, label_smoothing=0.0, **kwargs):
+  def __init__(self, alpha, gamma, label_smoothing=0.0, mask=None, **kwargs):
     """Initialize focal loss.
 
     Args:
@@ -486,6 +486,7 @@ class FocalLoss(tf.keras.losses.Loss):
     self.alpha = alpha
     self.gamma = gamma
     self.label_smoothing = label_smoothing
+    self.mask = mask
 
   @tf.autograph.experimental.do_not_convert
   def call(self, y, y_pred):
@@ -507,10 +508,12 @@ class FocalLoss(tf.keras.losses.Loss):
     pred_prob = tf.sigmoid(y_pred)
     p_t = (y_true * pred_prob) + ((1 - y_true) * (1 - pred_prob))
     alpha_factor = y_true * alpha + (1 - y_true) * (1 - alpha)
-    modulating_factor = (1.0 - p_t)**gamma
+    modulating_factor = (1.0 - p_t) ** gamma
 
     # apply label smoothing for cross_entropy for each entry.
     y_true = y_true * (1.0 - self.label_smoothing) + 0.5 * self.label_smoothing
+    if self.mask:
+      y_true = y_true * self.mask
     ce = tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=y_pred)
 
     # compute the final loss and return
